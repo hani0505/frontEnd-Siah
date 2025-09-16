@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@djpfs/react-vlibras": "^2.0.2",
+    "axios": "^1.12.2",
     "primeicons": "^7.0.0",
     "primereact": "^10.9.6",
     "react": "^19.1.0",

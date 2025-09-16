@@ -1,4 +1,12 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
+import { 
+  createPacient, 
+  showPacient, 
+  obterPacientesAguardandoTriagem as apiObterPacientesAguardandoTriagem, 
+  obterPacientesAguardandoAvaliacaoMedica as apiObterPacientesAguardandoAvaliacaoMedica, 
+  editPacient, 
+  saveTriageData 
+} from "../services/paciente"; // Ajuste o caminho conforme necessário
 
 const SistemaAtendimentoContext = createContext();
 
@@ -15,8 +23,8 @@ export const SistemaAtendimentoProvider = ({ children }) => {
   
   // Estados principais
   const [pacientes, setPacientes] = useState([]);
-  const [filaTriagem, setFilaTriagem] = useState([]); // Fila FIFO para triagem
-  const [filaAvaliacaoMedica, setFilaAvaliacaoMedica] = useState([]); // Fila priorizada para médicos
+  const [filaTriagem, setFilaTriagem] = useState([]);
+  const [filaAvaliacaoMedica, setFilaAvaliacaoMedica] = useState([]);
   const [pacienteAtualTriagem, setPacienteAtualTriagem] = useState(null);
   const [pacienteAtualMedico, setPacienteAtualMedico] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -24,6 +32,7 @@ export const SistemaAtendimentoProvider = ({ children }) => {
   const [proximoId, setProximoId] = useState(1);
   const [fichasEmitidas, setFichasEmitidas] = useState([]);
   const [chamadasAtivas, setChamadasAtivas] = useState([]);
+  const [carregando, setCarregando] = useState(true);
 
   console.log("HospitalContext: Estados inicializados", {
     pacientes: pacientes.length,
@@ -35,83 +44,57 @@ export const SistemaAtendimentoProvider = ({ children }) => {
     telaAtiva
   });
 
-  // Carregar dados do localStorage na inicialização
+  // Carregar dados da API na inicialização
   useEffect(() => {
-    const pacientesSalvos = localStorage.getItem("pacientes");
-    const filaTriagemSalva = localStorage.getItem("filaTriagem");
-    const filaAvaliacaoSalva = localStorage.getItem("filaAvaliacaoMedica");
-    const proximoIdSalvo = localStorage.getItem("proximoId");
-    const pacienteAtualTriagemSalvo = localStorage.getItem("pacienteAtualTriagem");
-    const pacienteAtualMedicoSalvo = localStorage.getItem("pacienteAtualMedico");
-    const fichasSalvas = localStorage.getItem("fichasEmitidas");
-    const chamadasSalvas = localStorage.getItem("chamadasAtivas");
+    const carregarDados = async () => {
+      try {
+        setCarregando(true);
+        console.log("Carregando dados da API...");
+        
+        // Carregar pacientes
+        const pacientesData = await showPacient();
+        setPacientes(pacientesData);
+        
+        // Configurar filas baseadas no status dos pacientes
+        const filaTriagemIds = pacientesData
+          .filter(p => p.status === "aguardando_triagem")
+          .map(p => p.id);
+        
+        const filaAvaliacaoIds = pacientesData
+          .filter(p => p.status === "aguardando_avaliacao_medica")
+          .sort((a, b) => {
+            const prioridades = { 'vermelho': 5, 'laranja': 4, 'amarelo': 3, 'verde': 2, 'azul': 1 };
+            const prioridadeA = prioridades[a.corTriagem] || 0;
+            const prioridadeB = prioridades[b.corTriagem] || 0;
+            return prioridadeB - prioridadeA;
+          })
+          .map(p => p.id);
+        
+        setFilaTriagem(filaTriagemIds);
+        setFilaAvaliacaoMedica(filaAvaliacaoIds);
+        
+        // Encontrar próximo ID disponível
+        if (pacientesData.length > 0) {
+          const maxId = Math.max(...pacientesData.map(p => p.id));
+          setProximoId(maxId + 1);
+        }
+        
+        // Verificar se há pacientes em atendimento
+        const pacienteEmTriagem = pacientesData.find(p => p.status === "em_triagem");
+        const pacienteEmConsulta = pacientesData.find(p => p.status === "em_consulta");
+        
+        if (pacienteEmTriagem) setPacienteAtualTriagem(pacienteEmTriagem);
+        if (pacienteEmConsulta) setPacienteAtualMedico(pacienteEmConsulta);
+        
+      } catch (error) {
+        console.error("Erro ao carregar dados da API:", error);
+      } finally {
+        setCarregando(false);
+      }
+    };
 
-    if (pacientesSalvos) {
-      setPacientes(JSON.parse(pacientesSalvos));
-    }
-    if (filaTriagemSalva) {
-      setFilaTriagem(JSON.parse(filaTriagemSalva));
-    }
-    if (filaAvaliacaoSalva) {
-      setFilaAvaliacaoMedica(JSON.parse(filaAvaliacaoSalva));
-    }
-    if (proximoIdSalvo) {
-      setProximoId(parseInt(proximoIdSalvo));
-    }
-    if (pacienteAtualTriagemSalvo) {
-      setPacienteAtualTriagem(JSON.parse(pacienteAtualTriagemSalvo));
-    }
-    if (pacienteAtualMedicoSalvo) {
-      setPacienteAtualMedico(JSON.parse(pacienteAtualMedicoSalvo));
-    }
-    if (fichasSalvas) {
-      setFichasEmitidas(JSON.parse(fichasSalvas));
-    }
-    if (chamadasSalvas) {
-      setChamadasAtivas(JSON.parse(chamadasSalvas));
-    }
+    carregarDados();
   }, []);
-
-  // Salvar dados no localStorage sempre que houver mudanças
-  useEffect(() => {
-    localStorage.setItem("pacientes", JSON.stringify(pacientes));
-  }, [pacientes]);
-
-  useEffect(() => {
-    localStorage.setItem("filaTriagem", JSON.stringify(filaTriagem));
-  }, [filaTriagem]);
-
-  useEffect(() => {
-    localStorage.setItem("filaAvaliacaoMedica", JSON.stringify(filaAvaliacaoMedica));
-  }, [filaAvaliacaoMedica]);
-
-  useEffect(() => {
-    localStorage.setItem("proximoId", proximoId.toString());
-  }, [proximoId]);
-
-  useEffect(() => {
-    if (pacienteAtualTriagem) {
-      localStorage.setItem("pacienteAtualTriagem", JSON.stringify(pacienteAtualTriagem));
-    } else {
-      localStorage.removeItem("pacienteAtualTriagem");
-    }
-  }, [pacienteAtualTriagem]);
-
-  useEffect(() => {
-    if (pacienteAtualMedico) {
-      localStorage.setItem("pacienteAtualMedico", JSON.stringify(pacienteAtualMedico));
-    } else {
-      localStorage.removeItem("pacienteAtualMedico");
-    }
-  }, [pacienteAtualMedico]);
-
-  useEffect(() => {
-    localStorage.setItem("fichasEmitidas", JSON.stringify(fichasEmitidas));
-  }, [fichasEmitidas]);
-
-  useEffect(() => {
-    localStorage.setItem("chamadasAtivas", JSON.stringify(chamadasAtivas));
-  }, [chamadasAtivas]);
 
   // Função para gerar número de prontuário único
   const gerarNumeroProntuario = useCallback(() => {
@@ -131,262 +114,302 @@ export const SistemaAtendimentoProvider = ({ children }) => {
   }, []);
 
   // 1. Cadastrar paciente (Módulo de Cadastro da Recepção)
-  const cadastrarPaciente = useCallback((dadosPaciente) => {
-    const numeroProntuario = gerarNumeroProntuario();
-    
-    const novoPaciente = {
-      id: proximoId,
-      numeroProntuario,
-      ...dadosPaciente,
-      status: "aguardando_triagem", // Status inicial: aguarda triagem
-      horaCadastro: new Date().toISOString(),
-      // Campos obrigatórios validados
-      nome: dadosPaciente.nome?.trim(),
-      cpf: dadosPaciente.cpf?.replace(/\D/g, ''),
-      dataNascimento: dadosPaciente.dataNascimento,
-      sexo: dadosPaciente.sexo,
-      endereco: dadosPaciente.endereco?.trim(),
-      telefone: dadosPaciente.telefone?.replace(/\D/g, ''),
-      contatoEmergencia: dadosPaciente.contatoEmergencia?.trim(),
-      // Campos opcionais
-      rg: dadosPaciente.rg || '',
-      email: dadosPaciente.email || '',
-      convenio: dadosPaciente.convenio || 'SUS',
-      numeroCarteirinha: dadosPaciente.numeroCarteirinha || '',
-      motivoVisita: dadosPaciente.motivoVisita?.trim(),
-      sintomas: dadosPaciente.sintomas || []
-    };
+  const cadastrarPaciente = useCallback(async (dadosPaciente) => {
+    try {
+      const numeroProntuario = gerarNumeroProntuario();
+      
+      const novoPaciente = {
+        id: proximoId,
+        numeroProntuario,
+        ...dadosPaciente,
+        status: "aguardando_triagem",
+        horaCadastro: new Date().toISOString(),
+        nome: dadosPaciente.nome?.trim(),
+        cpf: dadosPaciente.cpf?.replace(/\D/g, ''),
+        dataNascimento: dadosPaciente.dataNascimento,
+        sexo: dadosPaciente.sexo,
+        endereco: dadosPaciente.endereco?.trim(),
+        telefone: dadosPaciente.telefone?.replace(/\D/g, ''),
+        contatoEmergencia: dadosPaciente.contatoEmergencia?.trim(),
+        rg: dadosPaciente.rg || '',
+        email: dadosPaciente.email || '',
+        convenio: dadosPaciente.convenio || 'SUS',
+        numeroCarteirinha: dadosPaciente.numeroCarteirinha || '',
+        motivoVisita: dadosPaciente.motivoVisita?.trim(),
+        sintomas: dadosPaciente.sintomas || []
+      };
 
-    setPacientes(prev => [...prev, novoPaciente]);
-    setProximoId(prev => prev + 1);
+      // Salvar no banco de dados
+      const pacienteSalvo = await createPacient(novoPaciente);
+      
+      // Atualizar estado local
+      setPacientes(prev => [...prev, pacienteSalvo]);
+      setProximoId(prev => prev + 1);
+      setFilaTriagem(prev => [...prev, pacienteSalvo.id]);
 
-    // Adicionar à fila de triagem (FIFO)
-    setFilaTriagem(prev => [...prev, novoPaciente.id]);
+      // Emitir ficha automaticamente
+      emitirFicha(pacienteSalvo);
 
-    // Emitir ficha automaticamente
-    emitirFicha(novoPaciente);
-
-    return novoPaciente;
+      return pacienteSalvo;
+    } catch (error) {
+      console.error("Erro ao cadastrar paciente:", error);
+      throw error;
+    }
   }, [proximoId, gerarNumeroProntuario]);
 
   // 2. Chamar próximo paciente para triagem (FIFO)
-  const chamarProximoPacienteTriagem = useCallback(() => {
+  const chamarProximoPacienteTriagem = useCallback(async () => {
     if (filaTriagem.length === 0) return null;
 
     const proximoId = filaTriagem[0];
     const paciente = pacientes.find((p) => p.id === proximoId);
 
     if (paciente && paciente.status === "aguardando_triagem") {
-      const pacienteAtualizado = {
-        ...paciente,
-        status: "em_triagem",
-        horaInicioTriagem: new Date().toISOString()
-      };
+      try {
+        // Atualizar status no banco
+        await editPacient(proximoId, { status: "em_triagem", horaInicioTriagem: new Date().toISOString() });
 
-      setPacientes(prev => prev.map((p) =>
-        p.id === proximoId ? pacienteAtualizado : p
-      ));
-      setFilaTriagem(prev => prev.filter((id) => id !== proximoId));
-      setPacienteAtualTriagem(pacienteAtualizado);
+        const pacienteAtualizado = {
+          ...paciente,
+          status: "em_triagem",
+          horaInicioTriagem: new Date().toISOString()
+        };
 
-      // Criar chamada ativa para triagem
-      const novaChamada = {
-        id: Date.now(),
-        pacienteId: proximoId,
-        pacienteNome: paciente.nome, // nome completo
-        numeroProntuario: paciente.numeroProntuario,
-        horaChamada: new Date().toISOString(),
-        tipo: 'triagem',
-        local: 'Triagem',
-        nomeCompleto: paciente.nome // Para uso interno
-      };
-      setChamadasAtivas(prev => [...prev, novaChamada]);
+        // Atualizar estado local
+        setPacientes(prev => prev.map((p) =>
+          p.id === proximoId ? pacienteAtualizado : p
+        ));
+        setFilaTriagem(prev => prev.filter((id) => id !== proximoId));
+        setPacienteAtualTriagem(pacienteAtualizado);
 
-      return pacienteAtualizado;
+        // Criar chamada ativa para triagem
+        const novaChamada = {
+          id: Date.now(),
+          pacienteId: proximoId,
+          pacienteNome: paciente.nome,
+          numeroProntuario: paciente.numeroProntuario,
+          horaChamada: new Date().toISOString(),
+          tipo: 'triagem',
+          local: 'Triagem',
+          nomeCompleto: paciente.nome
+        };
+        setChamadasAtivas(prev => [...prev, novaChamada]);
+
+        return pacienteAtualizado;
+      } catch (error) {
+        console.error("Erro ao chamar paciente para triagem:", error);
+        return null;
+      }
     }
     return null;
   }, [filaTriagem, pacientes]);
 
   // 3. Finalizar triagem e classificar risco
-  const finalizarTriagem = useCallback((pacienteId, dadosTriagem) => {
+  const finalizarTriagem = useCallback(async (pacienteId, dadosTriagem) => {
     const paciente = pacientes.find((p) => p.id === pacienteId);
     
     if (paciente && paciente.status === "em_triagem") {
-      const pacienteAtualizado = {
-        ...paciente,
-        status: "aguardando_avaliacao_medica",
-        corTriagem: dadosTriagem.corTriagem, // Vermelho, Laranja, Amarelo, Verde, Azul
-        horaFimTriagem: new Date().toISOString(),
-        // Dados da triagem
-        sinaisVitais: dadosTriagem.sinaisVitais || {},
-        queixaPrincipal: dadosTriagem.queixaPrincipal || '',
-        nivelDor: dadosTriagem.nivelDor || 0,
-        observacoesTriagem: dadosTriagem.observacoesTriagem || '',
-        nivelConsciencia: dadosTriagem.nivelConsciencia || 'Alerta'
-      };
-
-      setPacientes(prev => prev.map((p) =>
-        p.id === pacienteId ? pacienteAtualizado : p
-      ));
-      setPacienteAtualTriagem(null);
-
-      // Adicionar à fila de avaliação médica (priorizada)
-      setFilaAvaliacaoMedica(prev => {
-        const novaFila = [...prev, pacienteId];
-        // Ordenar por prioridade: Vermelho > Laranja > Amarelo > Verde > Azul
-        return novaFila.sort((a, b) => {
-          const pacienteA = pacientes.find(p => p.id === a);
-          const pacienteB = pacientes.find(p => p.id === b);
-          const prioridades = { 'vermelho': 5, 'laranja': 4, 'amarelo': 3, 'verde': 2, 'azul': 1 };
-          const prioridadeA = prioridades[pacienteA?.corTriagem] || 0;
-          const prioridadeB = prioridades[pacienteB?.corTriagem] || 0;
-          
-          if (prioridadeA !== prioridadeB) {
-            return prioridadeB - prioridadeA; // Maior prioridade primeiro
-          }
-          // Se mesma prioridade, FIFO
-          return prev.indexOf(a) - prev.indexOf(b);
-        });
-      });
-
-      // Remover chamada ativa de triagem
-      setChamadasAtivas(prev => prev.filter(chamada => 
-        !(chamada.pacienteId === pacienteId && chamada.tipo === 'triagem')
-      ));
-
-      // Atualizar ou emitir ficha com todos os dados
-      setFichasEmitidas(prev => {
-        const idx = prev.findIndex(f => f.pacienteId === pacienteId);
-        const fichaAtualizada = {
-          ...(idx !== -1 ? prev[idx] : {}),
-          id: idx !== -1 ? prev[idx].id : Date.now(),
-          pacienteId: pacienteAtualizado.id,
-          numeroProntuario: pacienteAtualizado.numeroProntuario,
-          pacienteNome: pacienteAtualizado.nome,
-          cpf: pacienteAtualizado.cpf,
-          motivoVisita: pacienteAtualizado.motivoVisita,
-          horaEmissao: new Date().toISOString(),
-          numeroFicha: `F${String(pacienteAtualizado.id).padStart(4, '0')}`,
-          corTriagem: pacienteAtualizado.corTriagem,
-          sinaisVitais: pacienteAtualizado.sinaisVitais,
-          queixaPrincipal: pacienteAtualizado.queixaPrincipal,
-          nivelDor: pacienteAtualizado.nivelDor,
-          observacoesTriagem: pacienteAtualizado.observacoesTriagem,
-          nivelConsciencia: pacienteAtualizado.nivelConsciencia,
-          status: pacienteAtualizado.status,
-          // Dados médicos podem ser preenchidos depois
-          diagnostico: prev[idx]?.diagnostico || '',
-          condutas: prev[idx]?.condutas || '',
-          prescricoes: prev[idx]?.prescricoes || [],
-          exames: prev[idx]?.exames || [],
-          orientacoes: prev[idx]?.orientacoes || '',
-          encaminhamento: prev[idx]?.encaminhamento || ''
+      try {
+        const dadosAtualizacao = {
+          status: "aguardando_avaliacao_medica",
+          corTriagem: dadosTriagem.corTriagem,
+          horaFimTriagem: new Date().toISOString(),
+          sinaisVitais: dadosTriagem.sinaisVitais || {},
+          queixaPrincipal: dadosTriagem.queixaPrincipal || '',
+          nivelDor: dadosTriagem.nivelDor || 0,
+          observacoesTriagem: dadosTriagem.observacoesTriagem || '',
+          nivelConsciencia: dadosTriagem.nivelConsciencia || 'Alerta'
         };
-        if (idx !== -1) {
-          // Atualiza ficha existente
-          const novaLista = [...prev];
-          novaLista[idx] = fichaAtualizada;
-          return novaLista;
-        } else {
-          // Emite nova ficha
-          return [...prev, fichaAtualizada];
-        }
-      });
 
-      return pacienteAtualizado;
+        // Salvar dados da triagem no banco
+        await saveTriageData(pacienteId, dadosAtualizacao);
+
+        const pacienteAtualizado = {
+          ...paciente,
+          ...dadosAtualizacao
+        };
+
+        // Atualizar estado local
+        setPacientes(prev => prev.map((p) =>
+          p.id === pacienteId ? pacienteAtualizado : p
+        ));
+        setPacienteAtualTriagem(null);
+
+        // Adicionar à fila de avaliação médica (priorizada)
+        setFilaAvaliacaoMedica(prev => {
+          const novaFila = [...prev, pacienteId];
+          return novaFila.sort((a, b) => {
+            const pacienteA = pacientes.find(p => p.id === a);
+            const pacienteB = pacientes.find(p => p.id === b);
+            const prioridades = { 'vermelho': 5, 'laranja': 4, 'amarelo': 3, 'verde': 2, 'azul': 1 };
+            const prioridadeA = prioridades[pacienteA?.corTriagem] || 0;
+            const prioridadeB = prioridades[pacienteB?.corTriagem] || 0;
+            
+            if (prioridadeA !== prioridadeB) {
+              return prioridadeB - prioridadeA;
+            }
+            return prev.indexOf(a) - prev.indexOf(b);
+          });
+        });
+
+        // Remover chamada ativa de triagem
+        setChamadasAtivas(prev => prev.filter(chamada => 
+          !(chamada.pacienteId === pacienteId && chamada.tipo === 'triagem')
+        ));
+
+        // Atualizar ou emitir ficha
+        setFichasEmitidas(prev => {
+          const idx = prev.findIndex(f => f.pacienteId === pacienteId);
+          const fichaAtualizada = {
+            ...(idx !== -1 ? prev[idx] : {}),
+            id: idx !== -1 ? prev[idx].id : Date.now(),
+            pacienteId: pacienteAtualizado.id,
+            numeroProntuario: pacienteAtualizado.numeroProntuario,
+            pacienteNome: pacienteAtualizado.nome,
+            cpf: pacienteAtualizado.cpf,
+            motivoVisita: pacienteAtualizado.motivoVisita,
+            horaEmissao: new Date().toISOString(),
+            numeroFicha: `F${String(pacienteAtualizado.id).padStart(4, '0')}`,
+            corTriagem: pacienteAtualizado.corTriagem,
+            sinaisVitais: pacienteAtualizado.sinaisVitais,
+            queixaPrincipal: pacienteAtualizado.queixaPrincipal,
+            nivelDor: pacienteAtualizado.nivelDor,
+            observacoesTriagem: pacienteAtualizado.observacoesTriagem,
+            nivelConsciencia: pacienteAtualizado.nivelConsciencia,
+            status: pacienteAtualizado.status,
+            diagnostico: prev[idx]?.diagnostico || '',
+            condutas: prev[idx]?.condutas || '',
+            prescricoes: prev[idx]?.prescricoes || [],
+            exames: prev[idx]?.exames || [],
+            orientacoes: prev[idx]?.orientacoes || '',
+            encaminhamento: prev[idx]?.encaminhamento || ''
+          };
+          if (idx !== -1) {
+            const novaLista = [...prev];
+            novaLista[idx] = fichaAtualizada;
+            return novaLista;
+          } else {
+            return [...prev, fichaAtualizada];
+          }
+        });
+
+        return pacienteAtualizado;
+      } catch (error) {
+        console.error("Erro ao finalizar triagem:", error);
+        return null;
+      }
     }
     return null;
   }, [pacientes]);
 
   // 4. Chamar próximo paciente para avaliação médica (priorizada)
-  const chamarProximoPacienteMedico = useCallback(() => {
+  const chamarProximoPacienteMedico = useCallback(async () => {
     if (filaAvaliacaoMedica.length === 0) return null;
 
     const proximoId = filaAvaliacaoMedica[0];
     const paciente = pacientes.find((p) => p.id === proximoId);
 
     if (paciente && paciente.status === "aguardando_avaliacao_medica") {
-      const pacienteAtualizado = {
-        ...paciente,
-        status: "em_consulta",
-        horaInicioConsulta: new Date().toISOString()
-      };
+      try {
+        // Atualizar status no banco
+        await editPacient(proximoId, { status: "em_consulta", horaInicioConsulta: new Date().toISOString() });
 
-      setPacientes(prev => prev.map((p) =>
-        p.id === proximoId ? pacienteAtualizado : p
-      ));
-      setFilaAvaliacaoMedica(prev => prev.filter((id) => id !== proximoId));
-      setPacienteAtualMedico(pacienteAtualizado);
+        const pacienteAtualizado = {
+          ...paciente,
+          status: "em_consulta",
+          horaInicioConsulta: new Date().toISOString()
+        };
 
-      // Criar chamada ativa para consulta
-      const novaChamada = {
-        id: Date.now(),
-        pacienteId: proximoId,
-        pacienteNome: paciente.nome, // nome completo
-        numeroProntuario: paciente.numeroProntuario,
-        horaChamada: new Date().toISOString(),
-        tipo: 'consulta',
-        local: currentUser?.consultorio || 'Consultório Principal',
-        nomeCompleto: paciente.nome, // Para uso interno
-        corTriagem: paciente.corTriagem
-      };
-      setChamadasAtivas(prev => [...prev, novaChamada]);
+        setPacientes(prev => prev.map((p) =>
+          p.id === proximoId ? pacienteAtualizado : p
+        ));
+        setFilaAvaliacaoMedica(prev => prev.filter((id) => id !== proximoId));
+        setPacienteAtualMedico(pacienteAtualizado);
 
-      return pacienteAtualizado;
+        // Criar chamada ativa para consulta
+        const novaChamada = {
+          id: Date.now(),
+          pacienteId: proximoId,
+          pacienteNome: paciente.nome,
+          numeroProntuario: paciente.numeroProntuario,
+          horaChamada: new Date().toISOString(),
+          tipo: 'consulta',
+          local: currentUser?.consultorio || 'Consultório Principal',
+          nomeCompleto: paciente.nome,
+          corTriagem: paciente.corTriagem
+        };
+        setChamadasAtivas(prev => [...prev, novaChamada]);
+
+        return pacienteAtualizado;
+      } catch (error) {
+        console.error("Erro ao chamar paciente para consulta:", error);
+        return null;
+      }
     }
     return null;
   }, [filaAvaliacaoMedica, pacientes, currentUser]);
 
   // 5. Finalizar consulta médica
-  const finalizarConsulta = useCallback((pacienteId, dadosConsulta) => {
+  const finalizarConsulta = useCallback(async (pacienteId, dadosConsulta) => {
     const paciente = pacientes.find((p) => p.id === pacienteId);
     
     if (paciente && paciente.status === "em_consulta") {
-      const pacienteAtualizado = {
-        ...paciente,
-        status: dadosConsulta.statusFinal || "atendimento_concluido", // atendimento_concluido, aguardando_exame, internado, encaminhado
-        horaFimConsulta: new Date().toISOString(),
-        // Dados da consulta
-        diagnostico: dadosConsulta.diagnostico || '',
-        condutas: dadosConsulta.condutas || '',
-        prescricoes: dadosConsulta.prescricoes || [],
-        exames: dadosConsulta.exames || [],
-        orientacoes: dadosConsulta.orientacoes || '',
-        encaminhamento: dadosConsulta.encaminhamento || ''
-      };
+      try {
+        const dadosAtualizacao = {
+          status: dadosConsulta.statusFinal || "atendimento_concluido",
+          horaFimConsulta: new Date().toISOString(),
+          diagnostico: dadosConsulta.diagnostico || '',
+          condutas: dadosConsulta.condutas || '',
+          prescricoes: dadosConsulta.prescricoes || [],
+          exames: dadosConsulta.exames || [],
+          orientacoes: dadosConsulta.orientacoes || '',
+          encaminhamento: dadosConsulta.encaminhamento || ''
+        };
 
-      setPacientes(prev => prev.map((p) =>
-        p.id === pacienteId ? pacienteAtualizado : p
-      ));
-      setPacienteAtualMedico(null);
+        // Atualizar no banco
+        await editPacient(pacienteId, dadosAtualizacao);
 
-      // Remover chamada ativa de consulta
-      setChamadasAtivas(prev => prev.filter(chamada => 
-        !(chamada.pacienteId === pacienteId && chamada.tipo === 'consulta')
-      ));
+        const pacienteAtualizado = {
+          ...paciente,
+          ...dadosAtualizacao
+        };
 
-      // Atualizar ficha com dados médicos e status
-      setFichasEmitidas(prev => {
-        const idx = prev.findIndex(f => f.pacienteId === pacienteId);
-        if (idx !== -1) {
-          const fichaAtualizada = {
-            ...prev[idx],
-            diagnostico: pacienteAtualizado.diagnostico,
-            condutas: pacienteAtualizado.condutas,
-            prescricoes: pacienteAtualizado.prescricoes,
-            exames: pacienteAtualizado.exames,
-            orientacoes: pacienteAtualizado.orientacoes,
-            encaminhamento: pacienteAtualizado.encaminhamento,
-            status: pacienteAtualizado.status
-          };
-          const novaLista = [...prev];
-          novaLista[idx] = fichaAtualizada;
-          return novaLista;
-        }
-        return prev;
-      });
+        setPacientes(prev => prev.map((p) =>
+          p.id === pacienteId ? pacienteAtualizado : p
+        ));
+        setPacienteAtualMedico(null);
 
-      return pacienteAtualizado;
+        // Remover chamada ativa de consulta
+        setChamadasAtivas(prev => prev.filter(chamada => 
+          !(chamada.pacienteId === pacienteId && chamada.tipo === 'consulta')
+        ));
+
+        // Atualizar ficha com dados médicos e status
+        setFichasEmitidas(prev => {
+          const idx = prev.findIndex(f => f.pacienteId === pacienteId);
+          if (idx !== -1) {
+            const fichaAtualizada = {
+              ...prev[idx],
+              diagnostico: pacienteAtualizado.diagnostico,
+              condutas: pacienteAtualizado.condutas,
+              prescricoes: pacienteAtualizado.prescricoes,
+              exames: pacienteAtualizado.exames,
+              orientacoes: pacienteAtualizado.orientacoes,
+              encaminhamento: pacienteAtualizado.encaminhamento,
+              status: pacienteAtualizado.status
+            };
+            const novaLista = [...prev];
+            novaLista[idx] = fichaAtualizada;
+            return novaLista;
+          }
+          return prev;
+        });
+
+        return pacienteAtualizado;
+      } catch (error) {
+        console.error("Erro ao finalizar consulta:", error);
+        return null;
+      }
     }
     return null;
   }, [pacientes]);
@@ -528,6 +551,7 @@ export const SistemaAtendimentoProvider = ({ children }) => {
     telaAtiva,
     chamadasAtivas,
     fichasEmitidas,
+    carregando,
     
     // Funções principais
     cadastrarPaciente,
@@ -560,6 +584,7 @@ export const SistemaAtendimentoProvider = ({ children }) => {
     telaAtiva,
     chamadasAtivas,
     fichasEmitidas,
+    carregando,
     cadastrarPaciente,
     chamarProximoPacienteTriagem,
     finalizarTriagem,

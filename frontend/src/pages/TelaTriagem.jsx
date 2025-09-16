@@ -144,6 +144,13 @@ const TelaTriagem = () => {
   const [showEtiquetaModal, setShowEtiquetaModal] = useState(false);
   const [pacienteEtiqueta, setPacienteEtiqueta] = useState(null);
   const [showFila, setShowFila] = useState(false);
+  const [carregando, setCarregando] = useState(false);
+
+  // DEBUG: Verificar dados
+  useEffect(() => {
+    console.log("Paciente atual em triagem:", pacienteAtualTriagem);
+    console.log("Pacientes aguardando:", obterPacientesAguardandoTriagem);
+  }, [pacienteAtualTriagem, obterPacientesAguardandoTriagem]);
 
   // Verificar se o usuário está logado e tem acesso
   useEffect(() => {
@@ -175,14 +182,38 @@ const TelaTriagem = () => {
     { value: 'azul', label: '🔵 AZUL - Não Urgente', severity: 'info' }
   ];
 
-  const handleCallNextPatient = () => {
-    const result = chamarProximoPacienteTriagem();
-    if (result) {
-      showToast(`Paciente ${result.nome} chamado para triagem`);
-      setShowTriageForm(true);
-      setShowFila(false);
-    } else {
-      showError('Nenhum paciente na fila de triagem');
+  const handleCallNextPatient = async () => {
+    try {
+      setCarregando(true);
+      const result = await chamarProximoPacienteTriagem();
+      if (result) {
+        showToast(`Paciente ${result.nome} chamado para triagem`);
+        setShowTriageForm(true);
+        setShowFila(false);
+        
+        // Resetar o formulário para o novo paciente
+        setTriageData({
+          corTriagem: 'verde',
+          queixaPrincipal: '',
+          nivelDor: 0,
+          nivelConsciencia: 'Alerta',
+          sinaisVitais: {
+            pressaoArterial: '',
+            temperatura: '',
+            frequenciaCardiaca: '',
+            saturacaoOxigenio: '',
+            frequenciaRespiratoria: '',
+            peso: ''
+          },
+          observacoesTriagem: ''
+        });
+      } else {
+        showError('Nenhum paciente na fila de triagem');
+      }
+    } catch (error) {
+      showError('Erro ao chamar paciente: ' + error.message);
+    } finally {
+      setCarregando(false);
     }
   };
 
@@ -190,7 +221,8 @@ const TelaTriagem = () => {
     if (!pacienteAtualTriagem) return;
 
     try {
-      finalizarTriagem(pacienteAtualTriagem.id, triageData);
+      setCarregando(true);
+      await finalizarTriagem(pacienteAtualTriagem.id, triageData);
       
       showToast(`Triagem de ${pacienteAtualTriagem.nome} finalizada! Classificação: ${triageData.corTriagem.toUpperCase()}`);
       setShowSuccessModal(true);
@@ -202,21 +234,22 @@ const TelaTriagem = () => {
         convenio: pacienteAtualTriagem.convenio || '',
         dataHora: new Date().toLocaleString('pt-BR')
       });
-      // Não fechar o formulário ainda
     } catch (error) {
-      showError('Erro ao finalizar triagem');
+      showError('Erro ao finalizar triagem: ' + error.message);
+    } finally {
+      setCarregando(false);
     }
   };
 
   const getPriorityColor = (color) => {
     const colors = {
-      'vermelho': 'bg-red-500',
-      'laranja': 'bg-orange-500',
-      'amarelo': 'bg-yellow-500',
-      'verde': 'bg-green-500',
-      'azul': 'bg-blue-500'
+      'vermelho': 'bg-red-500 text-white',
+      'laranja': 'bg-orange-500 text-white',
+      'amarelo': 'bg-yellow-500 text-white',
+      'verde': 'bg-green-500 text-white',
+      'azul': 'bg-blue-500 text-white'
     };
-    return colors[color] || 'bg-gray-500';
+    return colors[color] || 'bg-gray-500 text-white';
   };
 
   const getPriorityName = (color) => {
@@ -270,8 +303,21 @@ const TelaTriagem = () => {
     }));
   };
 
-  if (!currentUser || (currentUser.tipo !== 'enfermeiro' && currentUser.tipo !== 'recepcionista' && currentUser.tipo !== 'admin')) {
+  if (carregando) {
     return <LoadingSpinner />;
+  }
+
+  if (!currentUser || (currentUser.tipo !== 'enfermeiro' && currentUser.tipo !== 'recepcionista' && currentUser.tipo !== 'admin')) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="p-6">
+          <div className="text-center">
+            <h2 className="text-xl font-bold text-red-600 mb-4">Acesso Negado</h2>
+            <p className="text-gray-600">Apenas enfermeiros, recepcionistas e administradores podem acessar este painel.</p>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   return (
@@ -281,7 +327,7 @@ const TelaTriagem = () => {
         <div className="mb-4">
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-800">Triagem de Pacientes</h1>
           <div className="flex flex-col sm:flex-row sm:items-center text-gray-500 text-xs sm:text-sm mt-1 gap-1 sm:gap-0">
-            <span>{currentUser?.nome} - Enfermeiro</span>
+            <span>{currentUser?.nome} - {currentUser?.tipo}</span>
             <span className="sm:ml-auto">{new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR')}</span>
           </div>
         </div>
@@ -300,7 +346,7 @@ const TelaTriagem = () => {
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                     <p className="text-xs sm:text-sm text-gray-700">
-                      <span className="font-semibold">Data de Nascimento:</span> {pacienteAtualTriagem.dataNascimento ? new Date(pacienteAtualTriagem.dataNascimento).toLocaleDateString('pt-BR') : ''}
+                      <span className="font-semibold">Data de Nascimento:</span> {pacienteAtualTriagem.dataNascimento ? new Date(pacienteAtualTriagem.dataNascimento).toLocaleDateString('pt-BR') : 'N/A'}
                     </p>
                     <p className="text-xs sm:text-sm text-gray-700">
                       <span className="font-semibold">CPF:</span> {pacienteAtualTriagem.cpf || 'Não informado'}
@@ -311,10 +357,16 @@ const TelaTriagem = () => {
                     <p className="text-xs sm:text-sm text-gray-700">
                       <span className="font-semibold">Endereço:</span> {pacienteAtualTriagem.endereco || 'Não informado'}
                     </p>
+                    <p className="text-xs sm:text-sm text-gray-700">
+                      <span className="font-semibold">Convênio:</span> {pacienteAtualTriagem.convenio || 'Não informado'}
+                    </p>
+                    <p className="text-xs sm:text-sm text-gray-700">
+                      <span className="font-semibold">Prontuário:</span> {pacienteAtualTriagem.numeroProntuario || 'N/A'}
+                    </p>
                   </div>
                   <div className="mt-3 p-2 bg-gray-50 rounded-md">
                     <p className="text-xs sm:text-sm text-gray-700">
-                      <span className="font-semibold">Motivo da visita:</span> {pacienteAtualTriagem.motivoVisita}
+                      <span className="font-semibold">Motivo da visita:</span> {pacienteAtualTriagem.motivoVisita || 'Não informado'}
                     </p>
                     {pacienteAtualTriagem.observacoes && (
                       <p className="text-xs sm:text-sm text-gray-700 mt-1">
@@ -516,8 +568,7 @@ const TelaTriagem = () => {
                         key={paciente.id}
                         className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200 hover:bg-gray-100 transition-colors cursor-pointer"
                         onClick={() => {
-                          chamarProximoPacienteTriagem(paciente.id);
-                          setShowTriageForm(true);
+                          handleCallNextPatient();
                         }}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
@@ -545,8 +596,7 @@ const TelaTriagem = () => {
                               size="small"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                chamarProximoPacienteTriagem(paciente.id);
-                                setShowTriageForm(true);
+                                handleCallNextPatient();
                               }}
                               className="!bg-blue-600 !text-white !border-0 px-3 py-1 rounded-lg font-semibold transition-colors hover:!bg-blue-700 text-xs"
                             />
@@ -625,8 +675,7 @@ const TelaTriagem = () => {
                   label="Chamar"
                   size="small"
                   onClick={() => {
-                    chamarProximoPacienteTriagem(paciente.id);
-                    setShowTriageForm(true);
+                    handleCallNextPatient();
                     setShowFila(false);
                   }}
                   className="!bg-blue-600 !text-white !border-0 px-3 py-1 rounded-lg font-semibold transition-colors hover:!bg-blue-700"
@@ -650,7 +699,7 @@ const TelaTriagem = () => {
                 {pacienteAtualTriagem?.nome}
               </h3>
               <p className="text-gray-600 mb-3">
-                Classificação: <span className={`font-medium ${getPriorityColor(triageData.corTriagem)}`}>
+                Classificação: <span className={`font-medium px-2 py-1 rounded ${getPriorityColor(triageData.corTriagem)}`}>
                   {getPriorityName(triageData.corTriagem)}
                 </span>
               </p>
