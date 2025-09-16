@@ -7,7 +7,6 @@ import { InputTextarea } from "primereact/inputtextarea";
 import { Dropdown } from "primereact/dropdown";
 import { Button } from "primereact/button";
 import { Card } from "primereact/card";
-import { Divider } from "primereact/divider";
 import { Tag } from "primereact/tag";
 import { Slider } from "primereact/slider";
 import { Panel } from "primereact/panel";
@@ -139,18 +138,48 @@ const TelaTriagem = () => {
     },
     observacoesTriagem: ''
   });
+  
   const [showTriageForm, setShowTriageForm] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showEtiquetaModal, setShowEtiquetaModal] = useState(false);
   const [pacienteEtiqueta, setPacienteEtiqueta] = useState(null);
   const [showFila, setShowFila] = useState(false);
   const [carregando, setCarregando] = useState(false);
+  const [pacientesAguardando, setPacientesAguardando] = useState([]);
+
+  // CORREÇÃO: Carregar pacientes ao inicializar
+  useEffect(() => {
+    const carregarPacientes = async () => {
+      try {
+        setCarregando(true);
+        // Verificar se é uma função ou variável
+        if (typeof obterPacientesAguardandoTriagem === 'function') {
+          const pacientes = await obterPacientesAguardandoTriagem();
+          setPacientesAguardando(pacientes || []);
+        } else {
+          // Se for uma variável/array diretamente
+          setPacientesAguardando(obterPacientesAguardandoTriagem || []);
+        }
+      } catch (error) {
+        console.error("Erro ao carregar pacientes:", error);
+        showError("Erro ao carregar lista de pacientes");
+        setPacientesAguardando([]);
+      } finally {
+        setCarregando(false);
+      }
+    };
+
+    if (currentUser) {
+      carregarPacientes();
+    }
+  }, [obterPacientesAguardandoTriagem, currentUser, showError]);
 
   // DEBUG: Verificar dados
   useEffect(() => {
     console.log("Paciente atual em triagem:", pacienteAtualTriagem);
-    console.log("Pacientes aguardando:", obterPacientesAguardandoTriagem);
-  }, [pacienteAtualTriagem, obterPacientesAguardandoTriagem]);
+    console.log("Pacientes aguardando:", pacientesAguardando);
+    console.log("Tipo de obterPacientes:", typeof obterPacientesAguardandoTriagem);
+  }, [pacienteAtualTriagem, pacientesAguardando]);
 
   // Verificar se o usuário está logado e tem acesso
   useEffect(() => {
@@ -163,8 +192,6 @@ const TelaTriagem = () => {
       return;
     }
   }, [currentUser, showError]);
-
-  const pacientesAguardandoTriagem = obterPacientesAguardandoTriagem;
 
   // Opções para dropdowns
   const opcoesNivelConsciencia = [
@@ -185,30 +212,42 @@ const TelaTriagem = () => {
   const handleCallNextPatient = async () => {
     try {
       setCarregando(true);
-      const result = await chamarProximoPacienteTriagem();
-      if (result) {
-        showToast(`Paciente ${result.nome} chamado para triagem`);
-        setShowTriageForm(true);
-        setShowFila(false);
-        
-        // Resetar o formulário para o novo paciente
-        setTriageData({
-          corTriagem: 'verde',
-          queixaPrincipal: '',
-          nivelDor: 0,
-          nivelConsciencia: 'Alerta',
-          sinaisVitais: {
-            pressaoArterial: '',
-            temperatura: '',
-            frequenciaCardiaca: '',
-            saturacaoOxigenio: '',
-            frequenciaRespiratoria: '',
-            peso: ''
-          },
-          observacoesTriagem: ''
-        });
-      } else {
+      
+      // Verificar se há pacientes na fila
+      if (pacientesAguardando.length === 0) {
         showError('Nenhum paciente na fila de triagem');
+        return;
+      }
+      
+      // Verificar se é uma função
+      if (typeof chamarProximoPacienteTriagem === 'function') {
+        const result = await chamarProximoPacienteTriagem();
+        if (result) {
+          showToast(`Paciente ${result.nome} chamado para triagem`);
+          setShowTriageForm(true);
+          setShowFila(false);
+          
+          // Resetar o formulário para o novo paciente
+          setTriageData({
+            corTriagem: 'verde',
+            queixaPrincipal: '',
+            nivelDor: 0,
+            nivelConsciencia: 'Alerta',
+            sinaisVitais: {
+              pressaoArterial: '',
+              temperatura: '',
+              frequenciaCardiaca: '',
+              saturacaoOxigenio: '',
+              frequenciaRespiratoria: '',
+              peso: ''
+            },
+            observacoesTriagem: ''
+          });
+        } else {
+          showError('Erro ao chamar paciente para triagem');
+        }
+      } else {
+        showError('Função de chamar paciente não disponível');
       }
     } catch (error) {
       showError('Erro ao chamar paciente: ' + error.message);
@@ -222,18 +261,30 @@ const TelaTriagem = () => {
 
     try {
       setCarregando(true);
-      await finalizarTriagem(pacienteAtualTriagem.id, triageData);
       
-      showToast(`Triagem de ${pacienteAtualTriagem.nome} finalizada! Classificação: ${triageData.corTriagem.toUpperCase()}`);
-      setShowSuccessModal(true);
-      setPacienteEtiqueta({
-        nome: pacienteAtualTriagem.nome,
-        dataNascimento: pacienteAtualTriagem.dataNascimento,
-        sexo: pacienteAtualTriagem.sexo,
-        numeroProntuario: pacienteAtualTriagem.numeroProntuario,
-        convenio: pacienteAtualTriagem.convenio || '',
-        dataHora: new Date().toLocaleString('pt-BR')
-      });
+      // Verificar se é uma função
+      if (typeof finalizarTriagem === 'function') {
+        await finalizarTriagem(pacienteAtualTriagem.id, triageData);
+        
+        showToast(`Triagem de ${pacienteAtualTriagem.nome} finalizada! Classificação: ${triageData.corTriagem.toUpperCase()}`);
+        setShowSuccessModal(true);
+        setPacienteEtiqueta({
+          nome: pacienteAtualTriagem.nome,
+          dataNascimento: pacienteAtualTriagem.dataNascimento,
+          sexo: pacienteAtualTriagem.sexo,
+          numeroProntuario: pacienteAtualTriagem.numeroProntuario,
+          convenio: pacienteAtualTriagem.convenio || '',
+          dataHora: new Date().toLocaleString('pt-BR')
+        });
+        
+        // Recarregar a lista de pacientes após finalizar a triagem
+        if (typeof obterPacientesAguardandoTriagem === 'function') {
+          const pacientes = await obterPacientesAguardandoTriagem();
+          setPacientesAguardando(pacientes || []);
+        }
+      } else {
+        showError('Função de finalizar triagem não disponível');
+      }
     } catch (error) {
       showError('Erro ao finalizar triagem: ' + error.message);
     } finally {
@@ -377,7 +428,7 @@ const TelaTriagem = () => {
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2">
                   <Button
-                    label={`Ver Fila (${pacientesAguardandoTriagem.length})`}
+                    label={`Ver Fila (${pacientesAguardando.length})`}
                     outlined
                     onClick={() => setShowFila(true)}
                     className="!bg-gray-100 !text-gray-700 !border-0 px-3 sm:px-4 py-2 rounded-lg font-semibold transition-colors hover:!bg-blue-500 hover:!text-white text-sm"
@@ -540,7 +591,7 @@ const TelaTriagem = () => {
                   <div>
                     <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Fila de Triagem</h2>
                     <p className="text-gray-600 text-sm sm:text-base">
-                      {pacientesAguardandoTriagem.length} paciente(s) aguardando triagem
+                      {pacientesAguardando.length} paciente(s) aguardando triagem
                     </p>
                   </div>
                   <div className="flex flex-col sm:flex-row gap-2">
@@ -548,7 +599,7 @@ const TelaTriagem = () => {
                       label="Chamar Próximo"
                       icon="pi pi-user-plus"
                       onClick={handleCallNextPatient}
-                      disabled={pacientesAguardandoTriagem.length === 0}
+                      disabled={pacientesAguardando.length === 0}
                       className="!bg-blue-600 !text-white !border-0 px-4 py-2 rounded-lg font-semibold transition-colors hover:!bg-blue-700 text-sm"
                     />
                     <Button
@@ -561,9 +612,9 @@ const TelaTriagem = () => {
                   </div>
                 </div>
 
-                {pacientesAguardandoTriagem.length > 0 ? (
+                {pacientesAguardando.length > 0 ? (
                   <div className="space-y-3">
-                    {pacientesAguardandoTriagem.map((paciente, index) => (
+                    {pacientesAguardando.map((paciente, index) => (
                       <div
                         key={paciente.id}
                         className="bg-gray-50 rounded-lg p-3 sm:p-4 border border-gray-200 hover:bg-gray-100 transition-colors cursor-pointer"
@@ -625,18 +676,18 @@ const TelaTriagem = () => {
                 <h3 className="text-lg font-semibold text-gray-800 mb-4">Estatísticas</h3>
                 <div className="space-y-4">
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                    <div className="text-2xl font-bold text-blue-600 mb-1">{pacientesAguardandoTriagem.length}</div>
+                    <div className="text-2xl font-bold text-blue-600 mb-1">{pacientesAguardando.length}</div>
                     <div className="text-gray-700 text-sm font-medium">Aguardando Triagem</div>
                   </div>
                   <div className="bg-green-50 rounded-lg p-4 border border-green-200">
                     <div className="text-2xl font-bold text-green-600 mb-1">
-                      {pacientesAguardandoTriagem.filter(p => p.sexo === 'F').length}
+                      {pacientesAguardando.filter(p => p.sexo === 'F').length}
                     </div>
                     <div className="text-gray-700 text-sm font-medium">Pacientes Femininos</div>
                   </div>
                   <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                     <div className="text-2xl font-bold text-blue-600 mb-1">
-                      {pacientesAguardandoTriagem.filter(p => p.sexo === 'M').length}
+                      {pacientesAguardando.filter(p => p.sexo === 'M').length}
                     </div>
                     <div className="text-gray-700 text-sm font-medium">Pacientes Masculinos</div>
                   </div>
@@ -655,7 +706,7 @@ const TelaTriagem = () => {
           className="rounded-xl"
         >
           <div className="space-y-3 max-h-96 overflow-y-auto">
-            {pacientesAguardandoTriagem.map((paciente, index) => (
+            {pacientesAguardando.map((paciente, index) => (
               <div
                 key={paciente.id}
                 className="bg-gray-50 rounded-lg p-3 border border-gray-200 flex items-center justify-between"
